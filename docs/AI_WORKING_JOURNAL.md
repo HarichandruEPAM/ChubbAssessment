@@ -142,3 +142,65 @@ The reviewer's job at a Phase 1-2 gate is as much about setting up Phase 5-6 saf
 | Phase | Finding | Recommendation | Decision | Reasoning |
 |---|---|---|---|---|
 | Phase 2 | MINOR-04 | Remove `Policy.Id = Guid.Empty` initializer | Declined | Seeder assigns explicit Guids for RISK-09 determinism. `Guid.Empty` is a harmless default that does not conflict with EF Core's `ValueGeneratedOnAdd()` since the seeder bypasses that path entirely. The reviewer's concern (accidental insert of `00000000-...`) is valid in principle but does not apply to this codebase: no code path constructs a `Policy` and persists it without explicitly setting `Id`. |
+| Gate-2 | — | All findings applied; MIN-04 (Phase 5 TODO stubs) retained by design. | — | — |
+
+---
+
+## Phase 4 — Infrastructure Layer
+
+**Date:** 2026-06-08
+**ADRs governing this phase:** ADR-003 (no repository pattern), ADR-005 (enums as strings), ADR-006 (ExecuteUpdateAsync), ADR-009 (sort allow-list), ADR-010 (TimeProvider)
+
+### What was built
+
+- **PolicyDbContext** with fluent API configuration: unique index on `PolicyNumber`, `decimal(18,2)` precision on `PremiumAmount`, both enums stored as `nvarchar` strings (ADR-005), and automatic `CreatedAt`/`UpdatedAt` stamping via a shared `StampTimestamps()` private helper called from both `SaveChanges` and `SaveChangesAsync`. `TimeProvider` is constructor-injected (ADR-010); the interceptor guards `CreatedAt` with `== default(DateTime)` so explicitly assigned values (e.g., from the seeder) are preserved.
+- **PolicyService** implementing `IPolicyService`: `IQueryable` composition with fully deferred execution, typed `Expression<Func<Policy, object>>` sort allow-list with `StringComparer.OrdinalIgnoreCase` (ADR-009), `ExecuteUpdateAsync` for bulk flag — single SQL `UPDATE` regardless of batch size (ADR-006), `TimeProvider` for expiry-soon calculation (ADR-010), `ExpiringSoonThresholdDays` read from `IConfiguration` with a default of 30 (RISK-02).
+- **PolicyDataSeeder**: 250 deterministic records, `new Random(42)`, fixed timestamp `new DateTime(2026,1,1,0,0,0,DateTimeKind.Utc)`, 44 APAC policyholder names, 20 underwriters, all 4 statuses and LOBs (round-robin), all 8 correct regions (Singapore, Hong Kong, Australia, Japan, Thailand, Indonesia, Malaysia, Philippines), 6 currencies via `Currency` static class.
+- **IDesignTimeDbContextFactory** for EF tooling: reads the `ConnectionStrings__DefaultConnection` environment variable and throws a clear `InvalidOperationException` if unset.
+- **AddInfrastructure()** DI extension: registers `DbContext`, `PolicyService`, and `TimeProvider.System`.
+- Startup migration + seed block in `Program.cs` (scope drift from Phase 5 — see below).
+- **EF Core InitialCreate migration**: `LineOfBusiness` and `Status` as `nvarchar(50)` (ADR-005), `PremiumAmount` as `decimal(18,2)`, unique index on `PolicyNumber`, all 14 schema fields present.
+
+### Gate-2 review: 11 findings, build was green throughout
+
+The build was green before the review. Static review was the only mechanism available to catch the defects found. A passing build gives no signal about client-side evaluation fallback, timestamp overwrite conflicts, or security constraint violations in design-time classes. All 11 findings (1 CRITICAL, 4 MAJOR, 6 MINOR) were identified by reading and reasoning about the code against the requirements, ADRs, and CLAUDE.md constraints.
+
+### The four smartest catches
+
+**MAJ-04 — The GroupBy `.ToString()` client-side evaluation trap**
+
+`GetSummaryAsync` originally called `g.Key.ToString()` inside a server-side `GroupBy` projection. EF Core cannot translate `.ToString()` on an enum inside a `Select` over a `GroupBy` key to SQL — it silently falls back to client-side evaluation, loading all policy rows into memory and aggregating in C#. The fix: GroupBy on the enum value directly (EF Core can translate that to a `GROUP BY` on the `nvarchar` column), then move `.ToString()` into the `ToDictionaryAsync` key selector, which runs after materialisation. This class of bug does not throw and produces no error — it silently degrades performance and defeats the server-side aggregation requirement. It is precisely why GroupBy projections deserve explicit scrutiny.
+
+**CRIT-01 / MAJ-01 — The interceptor-vs-seeder timestamp conflict**
+
+`PolicyDbContext.SaveChangesAsync` unconditionally stamped `CreatedAt = DateTime.UtcNow` on every `Added` entity. The seeder explicitly set `CreatedAt` to a fixed deterministic value before calling `SaveChangesAsync`. Two individually correct-looking files — the seeder setting the value, the interceptor overwriting it — combined into a bug that was invisible at compile time and at test time (no test asserted a specific seeded `CreatedAt`). The fix: guard with `entry.Entity.CreatedAt == default(DateTime)` so the interceptor only stamps when no value has been assigned. As a linked fix, the seeder's timestamp was changed from `DateTime.UtcNow` to the fixed `new DateTime(2026,1,1,0,0,0,DateTimeKind.Utc)` so every fresh database produces identical records.
+
+**MAJ-03 — The hardcoded connection string in PolicyDbContextFactory**
+
+`PolicyDbContextFactory` is design-time-only — it never runs in production — which makes a hardcoded connection string feel harmless. CLAUDE.md's prohibition on hardcoded connection strings has no carve-out for design-time files. A future developer could grep for connection strings, find this one, and copy it somewhere it does not belong. The fix: read from the `ConnectionStrings__DefaultConnection` environment variable and throw a clear `InvalidOperationException` if unset. The design-time tooling intent is fully preserved; the violation is not.
+
+**MIN-03 — The reviewer catching its own seeder DoD failure**
+
+The seeder's defined DoD required all 8 regions: Singapore, Hong Kong, Australia, Japan, Thailand, Indonesia, Malaysia, Philippines. The implementation included `"South Korea"` instead of `"Malaysia"`. The reviewer caught this by checking the actual region array against the requirements spec — not by checking that the code compiled or that the array had the right element count. Unit tests did not assert the exact region list; a requirements-aware review did.
+
+### Scope drift: startup migration in Program.cs
+
+The startup migration and seed block (`MigrateAsync` + `SeedAsync`) was added to `Program.cs` during Phase 4, whereas PLAN.md placed `Program.cs` wiring in Phase 5. The reviewer flagged this as scope drift (MIN-04). Human gate decision: **accepted with conditions**. The block is startup infrastructure, not API surface, and `Program.cs` is the correct location. The condition: the block must be wrapped in `try/catch` with structured logging before the phase is considered production-ready (MAJ-02). The corrector addressed this. The surrounding Phase 5 `TODO` stubs in `Program.cs` (Serilog, health checks, global error handling) are retained intentionally — they are Phase 5 work, not defects.
+
+### Pros
+
+- `PolicyService`'s `IQueryable` chain is genuinely deferred — `CountAsync` executes against the filtered-but-unpaged query, then `Skip`/`Take`/`ToListAsync` execute as a single terminal operation. No premature materialisation, no N+1 risk.
+- The sort allow-list provides SQL injection protection at the expression level: only typed lambda expressions defined in source code reach EF Core's `OrderBy` — never a user-supplied string.
+- `ExecuteUpdateAsync` for bulk flag issues a single SQL `UPDATE ... WHERE Id IN (...)` regardless of how many IDs are in the request. The change tracker is not involved.
+- `TimeProvider` injection makes the expiry-soon calculation fully controllable in tests. `FakeTimeProvider` with a fixed date makes any expiring-soon assertion deterministic.
+- Seeder determinism (`Random(42)` + fixed timestamp) means every fresh `docker-compose up` produces identical records.
+
+### Cons / known limitations
+
+- `GetSummaryAsync` makes three separate database round-trips (status counts, premium by LOB, expiring-soon count). Acceptable at assessment scale; a combined query or caching layer would be warranted under higher load.
+- EF Core's InMemory provider (used in unit tests) does not enforce the unique index on `PolicyNumber`. A duplicate `PolicyNumber` passes unit tests but fails on real SQL Server. Tests that assert uniqueness enforcement require an integration test against a real database or SQLite with migrations.
+- `IDesignTimeDbContextFactory` requires the `ConnectionStrings__DefaultConnection` environment variable to be set before running `dotnet ef` commands. Minor developer friction; the `InvalidOperationException` message documents the requirement.
+
+### Walkthrough takeaway
+
+This phase justifies the entire pipeline. Build green is not a quality bar. Static review caught defects that would have been silent runtime bugs — a client-side aggregation loading the full table, a timestamp conflict between two correct-looking files, a security constraint quietly violated in a dev-only class. The corrector addressed all 11 findings before the commit landed.
