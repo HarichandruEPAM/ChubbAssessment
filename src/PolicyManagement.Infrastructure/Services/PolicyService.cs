@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using PolicyManagement.Application.Constants;
 using PolicyManagement.Application.DTOs;
 using PolicyManagement.Application.Interfaces;
 using PolicyManagement.Domain.Entities;
@@ -16,7 +17,7 @@ public class PolicyService : IPolicyService
     private readonly int _expiringSoonDays;
 
     // Keys are camelCase to match API sort parameter convention; OrdinalIgnoreCase comparer handles variant casing.
-    // Allow-list for sort fields (ADR-009 / RISK-04)
+    // Allow-list for sort fields (ADR-009 / RISK-04). Keys must match SortFields.Allowed in Application — that is the single source of truth for allowed names.
     private static readonly Dictionary<string, Expression<Func<Policy, object>>> SortSelectors = new(StringComparer.OrdinalIgnoreCase)
     {
         ["policyNumber"]      = p => p.PolicyNumber,

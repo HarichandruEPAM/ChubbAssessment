@@ -1,0 +1,219 @@
+openapi: 3.0.3
+info:
+  title: Policy Management BFF API
+  description: Backend-for-Frontend service aggregating and serving Chubb APAC insurance policy data.
+  version: v1
+servers:
+  - url: /api/v1
+    description: Default server
+
+paths:
+  /policies:
+    get:
+      operationId: listPolicies
+      summary: List policies with pagination, filtering, and search
+      tags: [Policies]
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            default: createdAt
+            enum: [policyNumber, policyholderName, status, lineOfBusiness, premiumAmount, effectiveDate, expiryDate, createdAt, updatedAt]
+        - name: sortDirection
+          in: query
+          schema:
+            type: string
+            default: desc
+            enum: [asc, desc]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Active, Expired, Pending, Cancelled]
+        - name: lineOfBusiness
+          in: query
+          schema:
+            type: string
+            enum: [Property, Casualty, A&H, Marine]
+        - name: region
+          in: query
+          schema: { type: string }
+        - name: effectiveDateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: effectiveDateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated list of policies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPolicies'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /policies/summary:
+    get:
+      operationId: getPolicySummary
+      summary: Get aggregate summary statistics
+      tags: [Policies]
+      responses:
+        '200':
+          description: Summary statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicySummary'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /policies/flag:
+    patch:
+      operationId: bulkFlagPolicies
+      summary: Bulk flag policies for review
+      tags: [Policies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkFlagRequest'
+      responses:
+        '200':
+          description: Flag operation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkFlagResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /policies/{id}:
+    get:
+      operationId: getPolicyById
+      summary: Get a single policy by ID
+      tags: [Policies]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Policy detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  schemas:
+    Policy:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        policyNumber: { type: string, example: POL-123456 }
+        policyholderName: { type: string }
+        lineOfBusiness:
+          type: string
+          enum: [Property, Casualty, A&H, Marine]
+        status:
+          type: string
+          enum: [Active, Expired, Pending, Cancelled]
+        premiumAmount: { type: number, format: double }
+        currency: { type: string, example: USD }
+        effectiveDate: { type: string, format: date }
+        expiryDate: { type: string, format: date }
+        region: { type: string }
+        underwriter: { type: string }
+        flaggedForReview: { type: boolean }
+      required: [id, policyNumber, policyholderName, lineOfBusiness, status, premiumAmount, currency, effectiveDate, expiryDate, region, underwriter, flaggedForReview]
+
+    PaginatedPolicies:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Policy'
+        totalCount: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+      required: [items, totalCount, page, size]
+
+    PolicySummary:
+      type: object
+      properties:
+        statusCounts:
+          type: object
+          additionalProperties: { type: integer }
+        totalPremiumByLineOfBusiness:
+          type: object
+          additionalProperties: { type: number, format: double }
+        expiringSoonCount: { type: integer }
+      required: [statusCounts, totalPremiumByLineOfBusiness, expiringSoonCount]
+
+    BulkFlagRequest:
+      type: object
+      properties:
+        policyIds:
+          type: array
+          items: { type: string, format: uuid }
+          minItems: 1
+      required: [policyIds]
+
+    BulkFlagResult:
+      type: object
+      properties:
+        flagged: { type: integer }
+        notFound: { type: integer }
+      required: [flagged, notFound]
+
+    ProblemDetails:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    NotFound:
+      description: Resource not found
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    InternalServerError:
+      description: Unexpected server error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'

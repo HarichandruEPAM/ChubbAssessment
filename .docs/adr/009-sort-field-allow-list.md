@@ -46,6 +46,22 @@ The `Expression<Func<Policy, object>>` selectors are passed directly to EF Core'
 - Every new sortable field requires a manual entry in the dictionary. This is a minor maintenance overhead and is intentional — adding a sort field is a deliberate decision, not automatic.
 - The dictionary keys are lowercase strings; the comparison must be case-insensitive. If the normalization logic is applied inconsistently between validation and query building, a valid field could pass validation but fail to find a selector. This is mitigated by using the same dictionary for both operations.
 
+## Implementation Notes
+
+The complete set of allowed sort fields (9 entries) is:
+
+- `policyNumber`
+- `policyholderName`
+- `status`
+- `lineOfBusiness`
+- `premiumAmount`
+- `effectiveDate`
+- `expiryDate`
+- `createdAt`
+- `updatedAt`
+
+The single source of truth for these names is `PolicyManagement.Application.Constants.SortFields` (introduced in Phase 5 to resolve the duplication finding from the Phase 5 review — MAJOR-01). `PolicyListValidationFilter` references `SortFields.Allowed` for membership checks; `PolicyService.SortSelectors` keys must match these names exactly and includes a comment noting `SortFields.Allowed` as the authority.
+
 ## Alternatives Considered
 
 ### Alternative: Raw String Interpolation into SQL
