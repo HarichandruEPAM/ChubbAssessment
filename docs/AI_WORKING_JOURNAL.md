@@ -204,3 +204,123 @@ The startup migration and seed block (`MigrateAsync` + `SeedAsync`) was added to
 ### Walkthrough takeaway
 
 This phase justifies the entire pipeline. Build green is not a quality bar. Static review caught defects that would have been silent runtime bugs — a client-side aggregation loading the full table, a timestamp conflict between two correct-looking files, a security constraint quietly violated in a dev-only class. The corrector addressed all 11 findings before the commit landed.
+
+---
+
+## Phase 5 — API Layer
+
+**Date:** 2026-06-09
+**ADRs governing this phase:** ADR-008 (contract-first OpenAPI), ADR-009 (sort allow-list)
+
+### What was built
+
+- Contract-first OpenAPI 3.0.3 spec at `docs/openapi.yaml` (ADR-008) — all 4 endpoints, all schemas using `$ref`, reusable ProblemDetails error responses
+- `PoliciesController`: route order `/summary` → `/flag` → `/{id:guid}` (RISK-07), all actions ≤40 lines, `CancellationToken` throughout
+- `PolicyListRequest` (API boundary model with `[Range]` annotations), `BulkFlagRequest` with `[MinLength(1)]`
+- `PolicyListValidationFilter` (`IActionFilter`): sort allow-list, enum membership, date range, sortDirection — returns `application/problem+json` 400
+- `DatabaseHealthCheck` using `IServiceScopeFactory` for correct scoped `DbContext` resolution
+- `AddProblemDetails` + `UseExceptionHandler`: stack traces suppressed in non-Development
+- Serilog with `CompactJsonFormatter`, environment enrichment, `UseSerilogRequestLogging`
+- Swagger UI gated on `IsDevelopment()`
+
+### Gate-3 review: 2 MAJOR, 4 MINOR
+
+Build was green throughout — static review was the only way to find these.
+
+**Two smartest catches:**
+
+**MAJOR-02 — A&H contract mismatch.** The OpenAPI spec declared `"A&H"`, but the service serialised `"AandH"` via `LineOfBusiness.AandH.ToString()`. Every API response violated the published contract. Fix: `[JsonPropertyName("A&H")]` on the `AandH` enum member. Root cause: C# identifier rules force the `AandH` spelling; without an explicit attribute the contract and implementation diverge silently. This is the cost of contract-first without a verification step — the spec can be correct and the implementation can be correct in isolation, yet together they produce a mismatch.
+
+**MAJOR-01 — Sort allow-list duplication (ADR-009 violation).** `PolicyListValidationFilter` and `PolicyService` each had an independent copy of the 9 allowed sort field names. ADR-009 mandates a single source of truth. Fix: `SortFields` static class created in `Application.Constants`, referenced by both layers. A future addition or removal of a sortable field now requires a single edit; the compiler enforces consistency.
+
+### Pros
+
+- Sort allow-list centralisation eliminates a future class of silent drift bugs
+- Contract-first OpenAPI written before controllers kept API design intentional
+- Problem Details RFC 7807 implemented consistently across 400, 404, 500 responses
+- Serilog request logging gives structured per-request telemetry with zero controller code
+- Route ordering (`/summary` before `/{id:guid}`) resolves RISK-07 at the router level, not at runtime
+
+### Cons / known limitations
+
+- Swashbuckle generates a spec from controllers at runtime — there is no automated check that it matches `docs/openapi.yaml` (the contract-first source of truth). Drift is possible; MINOR-01 from the review called this out explicitly.
+- `DatabaseHealthCheck` uses a custom implementation because `AspNetCore.HealthChecks.EntityFrameworkCore` was not available in the offline NuGet cache
+
+### Walkthrough takeaway
+
+Contract-first is only meaningful if the contract and the implementation are verified to match. The A&H mismatch shows that even a simple `.ToString()` call on an enum is a serialization contract decision — not just a naming convenience. The fix is one attribute; the lesson is that every type that crosses a serialization boundary must have its wire representation made explicit.
+
+---
+
+## Phase 6 — Tests and Security
+
+**Date:** 2026-06-09
+**ADRs governing this phase:** ADR-007 (InMemory tests — limitations explicitly confirmed)
+
+### What was built
+
+- 19 production tests (+ 1 placeholder = 20 total): 12 `PolicyService` unit tests, 7 API validation tests
+- `PolicyService` tests use EF Core InMemory (`ListAsync`, `GetByIdAsync`, `GetSummaryAsync`) and SQLite in-memory (`BulkFlagAsync` — InMemory does not support `ExecuteUpdateAsync`)
+- `FakeTimeProvider` inner class for deterministic `GetSummaryAsync` expiry tests
+- `WebApplicationFactory<Program>` validation tests with InMemory DB substituted; Testing environment set to skip `MigrateAsync`
+
+### Test coverage
+
+| Method | Scenarios covered |
+|---|---|
+| `ListAsync` | Pagination, status filter, free-text search, unknown sort field fallback |
+| `GetByIdAsync` | Found + not-found |
+| `BulkFlagAsync` | All-found, idempotency (already-flagged), partial-success (unknown IDs) |
+| `GetSummaryAsync` | Status counts, expiring-soon with controlled `TimeProvider` |
+| API validation | `page=0`, `size=0`, `size=101`, invalid enum, inverted date range, empty bulk-flag body, 404 on unknown ID |
+
+### Key technical decision: SQLite for BulkFlagAsync
+
+EF Core InMemory does not support `ExecuteUpdateAsync` (bulk update without loading entities). Using SQLite in-memory (`DataSource=:memory:` with a kept-open `SqliteConnection`) for the three `BulkFlagAsync` tests provides a real relational provider. This surfaces the ADR-007 known limitation honestly: InMemory is adequate for most read-path and projection tests, but not for bulk EF operations. The tester switched providers rather than weakening the assertion or omitting the test — a test that does not exercise the production code path is worse than no test.
+
+### Security scan: PASS WITH NOTES
+
+8 findings total. 0 Critical, 0 High, 0 Medium. 4 Low, 4 Informational.
+
+**Low findings:**
+- `TrustServerCertificate=True` in `.env.example` template — must not be copied to staging/production without review
+- `SA_PASSWORD` visible in `docker inspect` via healthcheck CLI argument — acceptable for local dev; Docker secrets required for production
+- `BulkFlagAsync` `PolicyIds` has no `[MaxLength]` — potential DoS via huge `IN` clause; add upper bound before production
+- Swagger UI gated on `IsDevelopment()` but Dockerfile does not explicitly set `ASPNETCORE_ENVIRONMENT=Production`
+
+**Informational findings:** no auth (explicitly out of scope), unauthenticated health endpoints, `Search` param has no `MaxLength` (no injection risk), `Region` filter has no allow-list (no injection risk — EF Core parameterises the equality filter).
+
+Zero secrets in any committed file — confirmed clean by the security scan.
+
+### Pros
+
+- EF Core parameterised queries confirmed clean for all SQL paths including `ExecuteUpdateAsync`
+- Sort allow-list correctly prevents `ORDER BY` injection
+- All input validation at API boundary confirmed working through the test suite
+- 20 tests, 0 failures — test suite is honest (BulkFlagAsync correctly used SQLite rather than weakening the test to fit InMemory)
+
+### Cons / known limitations
+
+- No integration tests against real SQL Server — unique index constraints and migration correctness are not verified by the test suite
+- EF Core InMemory does not enforce the unique index on `PolicyNumber` — duplicate seeding would pass unit tests but fail on real SQL Server
+- ADR-007 limitation is documented but not mitigated within this sprint (deferred to Testcontainers integration tests — see PLAN.md "What I Would Do Next")
+
+### Walkthrough takeaway
+
+The tester agent's honest handling of the InMemory/`ExecuteUpdateAsync` limitation matters. It switched providers rather than weakening the test. A test that does not actually test the production code path gives false confidence. The `BulkFlagAsync` tests run against SQLite — a relational provider — and exercise the same `ExecuteUpdateAsync` path that production uses. This is the correct trade-off: more setup complexity in the test helper in exchange for a trustworthy assertion.
+
+---
+
+## Overall Pipeline Reflection
+
+**Date:** 2026-06-09
+
+What the agent-based pipeline delivered versus traditional ad-hoc work:
+
+**1. Two gates, not one.** Every phase had a written review before code was committed. Seven findings in Phase 4 and six in Phase 5 were caught by static review — after a green build. In traditional ad-hoc work, a passing build is typically the commit gate. The review agent adds a second gate that catches logic errors, contract mismatches, and cross-file interactions that the compiler cannot see.
+
+**2. Permanent decision record.** The journal captures what was accepted, what was challenged, and what was overridden — with reasoning. The A&H serialization decision, the scope-drift accept-with-conditions on `Program.cs` wiring, and the `Policy.Id Guid.Empty` decline are all traceable. In six months, a new developer can read why these choices were made, not just what was done.
+
+**3. Architecture preceded implementation.** ADRs for `ExecuteUpdateAsync`, `TimeProvider`, sort allow-list, and contract-first OpenAPI were written before a line of service code existed. The Phase 4 and Phase 5 reviewers could verify against the ADRs directly. Without pre-written ADRs, reviewers can only check style — not intent.
+
+**4. Emergent bug class caught.** The pipeline found the `DbContext` timestamp interceptor overwriting the seeder's explicit values — two individually correct files interacting incorrectly. Neither file had a bug in isolation. Catching cross-file emergent defects requires reviewing both files together against the same requirements. This is the hardest category to catch in ad-hoc review and the most valuable catch the pipeline made.

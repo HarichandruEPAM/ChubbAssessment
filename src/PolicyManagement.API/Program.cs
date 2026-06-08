@@ -85,9 +85,12 @@ try
 
     // ---------------------------------------------------------------------------
     // Startup migration and seed (Phase 4 — retained from original Program.cs).
+    // Skipped in the "Testing" environment so WebApplicationFactory tests can use
+    // the InMemory provider without hitting MigrateAsync (unsupported by InMemory).
     // ---------------------------------------------------------------------------
-    using (var scope = app.Services.CreateScope())
+    if (!app.Environment.IsEnvironment("Testing"))
     {
+        using var scope = app.Services.CreateScope();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         try
         {
@@ -150,3 +153,6 @@ finally
 {
     Log.CloseAndFlush();
 }
+
+// Required for WebApplicationFactory<Program> discovery in test projects.
+public partial class Program { }
