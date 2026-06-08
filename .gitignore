@@ -58,6 +58,9 @@ appsettings.*.local.json
 # Docker
 docker-compose.override.yml
 
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
 # OS artifacts
 .DS_Store
 Thumbs.db
