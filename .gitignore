@@ -1,0 +1,73 @@
+## .NET / C#
+
+# Build output
+bin/
+obj/
+out/
+
+# NuGet packages
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.sln.docstates
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Test results
+TestResults/
+coverage/
+*.trx
+*.coveragexml
+*.coverage
+
+# Entity Framework migrations (keep source, ignore snapshots if preferred — adjust as needed)
+# Uncomment to ignore EF snapshots:
+# **/Migrations/*Snapshot.cs
+
+# Published output
+publish/
+
+# .NET secrets (never commit)
+secrets.json
+appsettings.local.json
+appsettings.*.local.json
+
+# Environment files (never commit — contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+~$*
