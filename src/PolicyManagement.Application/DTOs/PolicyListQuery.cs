@@ -1,9 +1,11 @@
+using PolicyManagement.Application.Constants;
+
 namespace PolicyManagement.Application.DTOs;
 
 public sealed record PolicyListQuery(
     int Page = 1,
     int Size = 10,
-    string Sort = "createdAt",
+    string Sort = SortFields.Default,
     string SortDirection = "desc",
     string? Status = null,
     string? LineOfBusiness = null,

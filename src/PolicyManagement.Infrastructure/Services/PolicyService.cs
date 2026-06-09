@@ -70,9 +70,9 @@ public class PolicyService : IPolicyService
 
         var totalCount = await q.CountAsync(ct);
 
-        // Unknown sort field: fall back to createdAt desc. The allow-list is validated at the API layer (Phase 5 Task 5.3).
-        var selector = SortSelectors.GetValueOrDefault(query.Sort ?? "createdAt")
-                       ?? SortSelectors["createdAt"];
+        // Unknown sort field: fall back to SortFields.Default desc. The allow-list is validated at the API layer (Phase 5 Task 5.3).
+        var selector = SortSelectors.GetValueOrDefault(query.Sort ?? SortFields.Default)
+                       ?? SortSelectors[SortFields.Default];
         q = (query.SortDirection ?? "desc").Equals("asc", StringComparison.OrdinalIgnoreCase)
             ? q.OrderBy(selector)
             : q.OrderByDescending(selector);

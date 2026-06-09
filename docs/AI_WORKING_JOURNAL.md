@@ -324,3 +324,59 @@ What the agent-based pipeline delivered versus traditional ad-hoc work:
 **3. Architecture preceded implementation.** ADRs for `ExecuteUpdateAsync`, `TimeProvider`, sort allow-list, and contract-first OpenAPI were written before a line of service code existed. The Phase 4 and Phase 5 reviewers could verify against the ADRs directly. Without pre-written ADRs, reviewers can only check style — not intent.
 
 **4. Emergent bug class caught.** The pipeline found the `DbContext` timestamp interceptor overwriting the seeder's explicit values — two individually correct files interacting incorrectly. Neither file had a bug in isolation. Catching cross-file emergent defects requires reviewing both files together against the same requirements. This is the hardest category to catch in ad-hoc review and the most valuable catch the pipeline made.
+
+---
+
+## Final Gate — Full-Codebase Review and Corrections
+
+**Date:** 2026-06-09
+**Scope:** Comprehensive review of all 6 completed phases in a single pass. Reviewer, corrector, and security agent invoked sequentially.
+
+### Review findings (6 total: 4 MAJOR, 2 MINOR)
+
+**MAJOR-F1 — `[JsonPropertyName("A&H")]` on `LineOfBusiness.AandH` is inert (still unfixed from Phase 5)**
+
+The Phase 5 gate-3 correction added `[JsonPropertyName("A&H")]` to the Domain enum member, but this attribute has no effect in .NET 8 when the enum is converted to a string via `.ToString()` before entering the DTO. The DTOs hold `string LineOfBusiness`, not the enum — so the JSON serialiser never encounters the enum or its attributes. Every API response was still returning `"AandH"`, not `"A&H"`. The attribute also introduced a serialisation framework concern (`System.Text.Json.Serialization`) into the Domain layer, violating the architecture rule that Domain must be free of framework annotations.
+
+**Fix applied:** Removed `[JsonPropertyName]` and the `using` statement from `LineOfBusiness.cs`. Updated `docs/openapi.yaml` to declare `AandH` (not `A&H`) as the on-the-wire enum value in both the query parameter and the Policy schema, and added a note in the spec description explaining the representation. This is Option (b) from the Phase 5 review — the simpler and architecturally cleaner fix.
+
+**MAJOR-F2 — `BulkFlagRequest.PolicyIds` null bypasses `[MinLength(1)]` → `NullReferenceException`**
+
+A client sending `{ "policyIds": null }` would have `PolicyIds` set to `null` after model binding (overriding the default `[]`). DataAnnotations does not evaluate `[MinLength(1)]` on a null value, so validation is silently skipped. The controller passes `null` directly to `BulkFlagAsync`, which calls `ids.Contains(p.Id)` and throws a `NullReferenceException` that the global exception handler would return as 500.
+
+**Fix applied:** Added `[Required]` to `PolicyIds` in `BulkFlagRequest`. This ensures the model binding rejects null before validation attributes are evaluated, returning a 400 Problem Details response.
+
+**MAJOR-F3 — `SortFields.Default` constant defined but never referenced**
+
+`SortFields.Default = "createdAt"` was introduced by the Phase 5 corrector alongside `SortFields.Allowed`, but the four use-sites of the default sort field continued to use the literal `"createdAt"` instead of the constant. This defeated the single-source-of-truth goal of the `SortFields` extraction: if the default sort field were changed, `SortFields.Default` would be updated but all four literal sites would remain unchanged.
+
+**Fix applied:** All four `"createdAt"` default references now use `SortFields.Default`: `PolicyListRequest.Sort` default, `PolicyListRequest.ToQuery()`, `PolicyListQuery.Sort` parameter default, and `PolicyService.ListAsync` sort fallback.
+
+**MINOR-F1 — `ValidationTests` uses hardcoded `"ValidationTestDb"` — shared mutable state**
+
+EF Core InMemory stores are keyed by name within the process. All `ValidationTests` instances shared the same `"ValidationTestDb"` name, which violates CLAUDE.md's "no shared mutable state" test rule and would silently break isolation if any test ever writes data. `PolicyServiceTests` uses `Guid.NewGuid().ToString()` per test — the `ValidationTests` pattern was inconsistent.
+
+**Fix applied:** Changed to `Guid.NewGuid().ToString()` per test, matching the `PolicyServiceTests` pattern.
+
+### Post-correction build and test results
+
+- `dotnet build`: **0 errors, 0 warnings**
+- `dotnet test`: **20 tests, 20 passed, 0 failed**
+
+### Security scan
+
+**Verdict: PASS** — No new vulnerabilities introduced by any of the corrections. All changes were either documentation updates, validation tightening, or pure refactors. Existing security controls (sort allow-list, EF Core parameterised queries, enum parse validation, Problem Details error handling) remain intact and unchanged.
+
+### Pros of the final gate
+
+- The `[JsonPropertyName]` miss demonstrates the risk of attempting to solve a serialisation contract problem at the wrong layer. Adding an attribute to the Domain enum looks like it should work — it doesn't, because the serialisation pipeline never reaches the enum. Reading the full call chain (enum → `.ToString()` → string field in DTO → JSON serialiser sees `string`) is the only way to catch this. A compiler won't.
+- The `[Required]` gap on `BulkFlagRequest.PolicyIds` is a precise example of how `[MinLength(1)]` alone is not equivalent to `[Required] + [MinLength(1)]`. The two attributes have different null-handling semantics in DataAnnotations. This class of bug requires knowing the validation evaluation order, not just checking that annotations are present.
+- The `SortFields.Default` dead constant was introduced by the previous corrector as part of the right fix (centralise the allow-list), but the constant itself was never wired up. This is a common class of "fix creates new cleanup debt" that requires a second pass to catch.
+
+### Cons
+
+- The A&H wire value choice (Option b: align spec to code, not code to spec) means clients reading the original spec would need to update their parsers. Option (a) — adding a proper `JsonStringEnumConverter` with a custom naming policy — would have preserved the `A&H` string on the wire, but required a custom converter class and a global `AddControllers().AddJsonOptions()` registration. Option (b) is simpler and avoids introducing serialisation infrastructure for a single enum value.
+
+### Takeaway
+
+Three of the four MAJOR findings trace to the same root: the Phase 5 corrector introduced fixes at the wrong abstraction level or left the fix incomplete. A corrector that fixes the right problem but in the wrong place creates a finding for the next gate. The value of a final comprehensive review pass is precisely this: it catches what previous partial-scope gates miss.

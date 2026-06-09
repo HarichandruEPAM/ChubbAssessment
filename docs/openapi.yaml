@@ -1,7 +1,13 @@
 openapi: 3.0.3
 info:
   title: Policy Management BFF API
-  description: Backend-for-Frontend service aggregating and serving Chubb APAC insurance policy data.
+  description: |
+    Backend-for-Frontend service aggregating and serving Chubb APAC insurance policy data.
+
+    **Line of Business wire representation:** The `A&H` (Accident & Health) line of business
+    is represented as `AandH` on the wire in all request parameters and response bodies.
+    The `&` character is not valid in a C# identifier, so the enum member is named `AandH`
+    and `.ToString()` produces that value. Clients must send and expect `AandH` for this LOB.
   version: v1
 servers:
   - url: /api/v1
@@ -41,7 +47,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [Property, Casualty, A&H, Marine]
+            enum: [Property, Casualty, AandH, Marine]
         - name: region
           in: query
           schema: { type: string }
@@ -136,7 +142,7 @@ components:
         policyholderName: { type: string }
         lineOfBusiness:
           type: string
-          enum: [Property, Casualty, A&H, Marine]
+          enum: [Property, Casualty, AandH, Marine]
         status:
           type: string
           enum: [Active, Expired, Pending, Cancelled]

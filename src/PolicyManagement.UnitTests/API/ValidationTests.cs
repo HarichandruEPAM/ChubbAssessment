@@ -26,9 +26,10 @@ public class ValidationTests : IClassFixture<WebApplicationFactory<Program>>
                     d.ServiceType == typeof(DbContextOptions<PolicyDbContext>));
                 if (descriptor != null) services.Remove(descriptor);
 
-                // Replace with InMemory
+                // Replace with InMemory — use a unique name per test instance so tests
+                // are fully isolated (CLAUDE.md: "no shared mutable state").
                 services.AddDbContext<PolicyDbContext>((sp, options) =>
-                    options.UseInMemoryDatabase("ValidationTestDb"),
+                    options.UseInMemoryDatabase(Guid.NewGuid().ToString()),
                     ServiceLifetime.Scoped);
             });
         }).CreateClient();
