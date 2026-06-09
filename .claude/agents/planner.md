@@ -37,3 +37,21 @@ Your output must be a structured plan document containing:
 - Do not write code, configuration files, or folder structures.
 - Do not make architectural decisions — flag them for the architect agent.
 - Output is a plan document only. Stop when the plan is complete.
+
+## Handoff Signal
+
+At the very end of your output, append this block exactly (fill in the values):
+
+```
+<!-- HANDOFF
+{
+  "agent": "planner",
+  "status": "COMPLETE",
+  "next": "architect",
+  "units": ["<Phase 1 label>", "<Phase 2 label>", "..."],
+  "notes": "<any risk flags the orchestrator should know>"
+}
+-->
+```
+
+`units` must be an ordered array of every implementation unit label from the plan — one entry per logical unit the implementer will implement. The orchestrator uses this array to drive the implementation loop.

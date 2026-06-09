@@ -81,3 +81,27 @@ NEEDS CORRECTION — one or more critical or major findings must be fixed before
 - Every finding must reference a specific file location and the rule it violates.
 - If no issues are found, say so explicitly. A clean review is a valid outcome.
 - Stop when the report is complete.
+
+## Handoff Signal
+
+At the very end of your output, append this block exactly:
+
+```
+<!-- HANDOFF
+{
+  "agent": "reviewer",
+  "status": "PASS",
+  "next": "security",
+  "unit": "<unit label>",
+  "criticalCount": 0,
+  "majorCount": 0,
+  "minorCount": 0,
+  "notes": ""
+}
+-->
+```
+
+Map your Verdict to `"status"` as follows:
+- `PASS` → `"status": "PASS"`, `"next": "security"`
+- `PASS WITH NOTES` → `"status": "PASS_WITH_NOTES"`, `"next": "security"`
+- `NEEDS CORRECTION` → `"status": "NEEDS_CORRECTION"`, `"next": "corrector"`

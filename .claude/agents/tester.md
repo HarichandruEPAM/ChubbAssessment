@@ -67,3 +67,25 @@ After running tests, produce:
 - Write tests only for the unit currently under review — do not write tests for unimplemented code.
 - Do not modify production code in this pass. If a bug is found, report it.
 - Stop when tests are written, run, and the report is complete.
+
+## Handoff Signal
+
+At the very end of your output, append this block exactly:
+
+```
+<!-- HANDOFF
+{
+  "agent": "tester",
+  "status": "PASS",
+  "next": "reviewer",
+  "unit": "<unit label>",
+  "totalTests": 0,
+  "passed": 0,
+  "failed": 0,
+  "bugsFound": [],
+  "notes": ""
+}
+-->
+```
+
+Set `"status"` to `"BUGS_FOUND"` (and `"next"` to `"implementer"`) if any test failed due to a real bug in production code. Set `"status"` to `"PASS"` and `"next"` to `"reviewer"` if all tests pass. List each confirmed bug in `"bugsFound"` as a short string description.

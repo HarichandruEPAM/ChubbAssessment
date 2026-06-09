@@ -59,3 +59,19 @@ For every significant structural or technology decision, produce an ADR with thi
 - Every non-obvious structural decision must have an ADR.
 - If a requirement is ambiguous, state your assumption explicitly before deciding.
 - Stop when all architecture documents and ADRs are complete.
+
+## Handoff Signal
+
+At the very end of your output, append this block exactly:
+
+```
+<!-- HANDOFF
+{
+  "agent": "architect",
+  "status": "COMPLETE",
+  "next": "implementer",
+  "artifacts": ["ARCHITECTURE.md", "adr/ADR-001.md"],
+  "notes": "<any implementation constraints the orchestrator should relay>"
+}
+-->
+```

@@ -73,3 +73,22 @@ Update only the sections affected by the current stage. Do not rewrite the entir
 - Journal entries must be honest — if something was poor quality, say so. The journal is a record of reality, not a highlight reel.
 - Do not fabricate entries for stages that have not occurred. Only document what has actually happened.
 - Stop when the reflection, journal entry, and README update are complete.
+
+## Handoff Signal
+
+At the very end of your output, append this block exactly:
+
+```
+<!-- HANDOFF
+{
+  "agent": "documenter",
+  "status": "COMPLETE",
+  "next": "implementer",
+  "unit": "<unit label>",
+  "artifactsUpdated": ["AI-JOURNAL.md", "README.md"],
+  "notes": ""
+}
+-->
+```
+
+Set `"next"` to `"implementer"` if more units remain, or `"done"` if this was the final documentation pass.

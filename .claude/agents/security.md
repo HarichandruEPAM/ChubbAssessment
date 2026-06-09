@@ -87,3 +87,28 @@ ACTION REQUIRED — one or more critical or high findings must be remediated
 - Every finding must include a file path and location — no vague "somewhere in the codebase" findings.
 - If a security concern is out of scope for this project phase (e.g., auth), flag it as informational rather than omitting it.
 - Stop when the report is complete.
+
+## Handoff Signal
+
+At the very end of your output, append this block exactly:
+
+```
+<!-- HANDOFF
+{
+  "agent": "security",
+  "status": "PASS",
+  "next": "documenter",
+  "unit": "<unit label>",
+  "criticalCount": 0,
+  "highCount": 0,
+  "mediumCount": 0,
+  "lowCount": 0,
+  "notes": ""
+}
+-->
+```
+
+Map your Verdict to `"status"` as follows:
+- `PASS` → `"status": "PASS"`, `"next": "documenter"`
+- `PASS WITH NOTES` → `"status": "PASS_WITH_NOTES"`, `"next": "documenter"`
+- `ACTION REQUIRED` → `"status": "ACTION_REQUIRED"`, `"next": "corrector"`

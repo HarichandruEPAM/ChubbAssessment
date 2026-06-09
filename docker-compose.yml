@@ -20,9 +20,9 @@ services:
         - "${SA_PASSWORD}"
         - -Q
         - "SELECT 1"
-        - -No
+        - -C
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 10
       start_period: 30s
 
@@ -32,6 +32,7 @@ services:
       dockerfile: Dockerfile
     environment:
       ConnectionStrings__DefaultConnection: "${ConnectionStrings__DefaultConnection}"
+      ASPNETCORE_ENVIRONMENT: "Development"
     ports:
       - "8080:8080"
     depends_on:

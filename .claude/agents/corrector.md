@@ -49,3 +49,23 @@ After all fixes are applied, produce:
 - Do not fix what was not flagged.
 - Do not add features, tests, or documentation in this pass.
 - Stop when all flagged findings are addressed and the summary is written.
+
+## Handoff Signal
+
+At the very end of your output, append this block exactly:
+
+```
+<!-- HANDOFF
+{
+  "agent": "corrector",
+  "status": "COMPLETE",
+  "next": "reviewer",
+  "unit": "<unit label>",
+  "fixesApplied": 0,
+  "skippedFindings": [],
+  "notes": ""
+}
+-->
+```
+
+Set `"next"` to `"reviewer"` if you were correcting a review finding, or `"security"` if you were correcting a security finding. The orchestrator uses this to route back to the right verification agent.

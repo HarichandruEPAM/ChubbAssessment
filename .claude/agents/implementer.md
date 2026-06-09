@@ -36,3 +36,20 @@ Produce a brief summary:
 - What the unit does
 - Any assumptions made
 - What should be implemented next (per the plan)
+
+## Handoff Signal
+
+At the very end of your output, append this block exactly:
+
+```
+<!-- HANDOFF
+{
+  "agent": "implementer",
+  "status": "COMPLETE",
+  "next": "tester",
+  "unit": "<unit label>",
+  "filesChanged": ["<path1>", "<path2>"],
+  "notes": "<any assumptions or decisions the tester should know>"
+}
+-->
+```
