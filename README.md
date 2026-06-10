@@ -275,3 +275,11 @@ This repository uses Claude Code with a structured multi-agent workflow. The `.c
 dotnet build PolicyManagement.sln  →  0 errors, 0 warnings
 dotnet test PolicyManagement.sln   →  20 tests, 20 passed, 0 failed
 ```
+
+## What Would Come Next (from PLAN.md "What I Would Do Next")
+- Testcontainers integration tests against real SQL Server 2022 (migration correctness, unique index enforcement)
+- Distributed caching for `GET /api/v1/policies/summary` with Redis + TTL invalidation on BulkFlag
+- Kafka producer for `PolicyFlaggedEvent`; consumer for status change events (idempotent)
+- Authentication (JWT Bearer + Azure AD / Entra ID for Chubb OneHub production)
+- `[MaxLength]` on `BulkFlagRequest.PolicyIds` and `Search` parameter (low-severity security findings)
+
