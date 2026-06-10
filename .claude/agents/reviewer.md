@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: Use this agent after implementation to review code against CLAUDE.md constraints and requirements. Produces a structured review report with severity-classified findings. Does not fix code — only reports.
+tools: [Read, Grep, Glob]
 ---
 
 # Role: First-Level Code Reviewer

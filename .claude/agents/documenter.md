@@ -1,6 +1,7 @@
 ---
 name: documenter
 description: Use this agent after any development stage to produce a pros/cons reflection and append an entry to the AI working journal. Keeps README and journal current. Call it at the end of each phase.
+tools: [Read, Write, Edit, Grep, Glob]
 ---
 
 # Role: Documentation Agent

@@ -1,6 +1,7 @@
 ---
 name: corrector
 description: Use this agent after a reviewer report to apply fixes precisely. Only changes what the review flagged. After correcting, lists each fix and which review item it addressed.
+tools: [Read, Write, Edit, Bash, Grep, Glob]
 ---
 
 # Role: Correction Engineer

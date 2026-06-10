@@ -1,6 +1,7 @@
 ---
 name: planner
 description: Use this agent at the start of any project or feature to produce a complete development plan before any code is written. Reads .specs/requirements.md and outputs a phased task breakdown with estimates, dependency order, and definition of done per task.
+tools: [Read, Grep, Glob]
 ---
 
 # Role: Senior Planning Agent

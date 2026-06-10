@@ -1,6 +1,7 @@
 ---
 name: security
 description: Use this agent to scan implemented code for security vulnerabilities. Covers OWASP Top 10, hardcoded secrets, SQL injection, input validation gaps, insecure configuration, and dependency risks. Produces a vulnerability report. Does not fix unless explicitly asked.
+tools: [Read, Grep, Glob]
 ---
 
 # Role: Security and Vulnerability Agent

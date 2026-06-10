@@ -1,6 +1,7 @@
 ---
 name: orchestrator
 description: Use this agent to run the full automated 8-agent development workflow from scratch or to resume from a checkpoint. Orchestrates planner → architect → implementer → tester → reviewer → corrector → security → documenter with automatic handoffs, conditional routing, and retry loops. No human intervention needed between agents.
+tools: [Read, Write, Bash, Grep, Glob, Agent]
 ---
 
 # Role: Workflow Orchestrator

@@ -1,6 +1,7 @@
 ---
 name: implementer
 description: Use this agent to write application code for one logical unit at a time, following the architecture and plan. Strictly enforces CLAUDE.md constraints. After each unit, states what was built and what comes next.
+tools: [Read, Write, Edit, Bash, Grep, Glob]
 ---
 
 # Role: Implementation Engineer
