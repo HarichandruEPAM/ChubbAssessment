@@ -232,6 +232,183 @@ External system → insurance.policies.status-changed → PolicyStatusChangedCon
 
 ---
 
+## MCP-Powered Test Generation (Planned)
+
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers expose live data sources and tools to AI agents. Wiring an MCP server into this project's Claude Code workflow would let the tester agent generate and run a **complete, realistic test suite automatically** — without hand-coding each case.
+
+### What MCP enables here
+
+| Capability | How it works |
+|---|---|
+| **OpenAPI-driven test generation** | An MCP server reads `docs/openapi.yaml` at generation time; the tester agent sees the live contract and generates a test for every endpoint, every parameter combination, and every documented error response — not just the ones a developer remembers to cover |
+| **Database-aware integration tests** | An MCP server connects to the running SQL Server instance; the agent can query actual seed data (250 APAC policies) to build assertions against real record counts, date ranges, and premium values instead of hard-coded magic numbers |
+| **Continuous contract verification** | On every PR, a CI step spins up the MCP server, the tester agent reads the current spec, re-generates integration tests, and runs them — any drift between code and contract fails the build before merge |
+| **Idempotency verification for Kafka consumer** | An MCP server publishes duplicate messages to the test Kafka topic; the tester agent asserts `ProcessedMessages` count stays at 1 and the policy status updates exactly once |
+
+### Implementation plan
+
+**Step 1 — OpenAPI MCP server**
+
+Create a lightweight MCP server (`mcp-servers/openapi-reader/`) that exposes one resource:
+
+```
+resource: openapi://spec
+→ returns the full parsed openapi.yaml as a structured object
+```
+
+The tester agent reads this resource and generates:
+- One happy-path test per endpoint
+- One test per documented 4xx error code
+- Boundary tests for every numeric parameter (`page`, `size`, `premiumAmount`)
+- Enum exhaustion tests for `status` and `lineOfBusiness`
+
+**Step 2 — Database MCP server**
+
+Create a second MCP server (`mcp-servers/db-inspector/`) that exposes:
+
+```
+resource: db://policies/count?status=Active
+resource: db://policies/sample?n=5
+tool:     db_query(sql: string) → rows   [read-only, parameterised only]
+```
+
+The tester agent uses these resources to:
+- Assert `GET /api/v1/policies?status=Active` returns exactly the count the DB reports
+- Assert `/summary` premiumByLob values match the DB aggregation
+- Assert the seeder produced the expected 250 records on first boot
+
+**Step 3 — Integration test project**
+
+Add `PolicyManagement.IntegrationTests` (separate from `UnitTests`):
+
+```
+PolicyManagement.IntegrationTests/
+  Api/
+    PoliciesListIntegrationTests.cs   ← filter/sort/pagination against real DB
+    PolicyDetailIntegrationTests.cs   ← 200 vs 404 with seed data IDs
+    BulkFlagIntegrationTests.cs       ← verifies DB state post-flag
+    SummaryIntegrationTests.cs        ← aggregation values vs DB counts
+  Kafka/
+    StatusChangedConsumerTests.cs     ← publishes to test topic, asserts DB update
+    IdempotencyTests.cs               ← duplicate message, asserts single DB row
+  Infrastructure/
+    CacheIntegrationTests.cs          ← summary hit/miss/invalidate cycle
+```
+
+Tests use `WebApplicationFactory<Program>` with a real SQL Server container (Testcontainers) — no InMemory shortcuts that hide SQL compatibility issues.
+
+**Step 4 — CI wiring**
+
+```yaml
+# .github/workflows/integration-tests.yml
+- name: Start MCP servers
+  run: docker-compose -f docker-compose.mcp.yml up -d
+
+- name: Run integration tests via tester agent
+  run: claude --agent tester "Read openapi://spec and db://policies/count. Generate and run all integration tests."
+
+- name: Upload test report
+  uses: actions/upload-artifact@v4
+  with:
+    path: test-results/
+```
+
+### Value delivered
+
+- **Zero test-case amnesia** — the agent reads the spec, not memory; every documented behaviour gets a test
+- **Living documentation** — tests are regenerated from the current spec on every run, so they drift with the API naturally
+- **Faster PR review** — reviewers see a generated test report alongside every diff; no "does this break anything?" guesswork
+- **Kafka confidence** — idempotency is notoriously hard to test manually; automated duplicate-message tests give deterministic coverage
+
+---
+
+## Future Feature Roadmap
+
+Features that would make this service production-ready and genuinely valuable to the Chubb APAC dashboard team. Ordered by impact.
+
+### Priority 1 — Security & Compliance (must-have for production)
+
+**Authentication and authorization**
+- JWT Bearer authentication via Azure AD / Entra ID (`Microsoft.Identity.Web`)
+- Role-based access control: `underwriter` can read and flag; `manager` can read summary; `admin` can do everything
+- All endpoints require a valid token; anonymous access returns 401
+- Claim-based filtering: underwriters see only their own policies (`WHERE Underwriter = @claimName`)
+
+**Audit trail**
+- Every write operation (`BulkFlagAsync`, future status changes) writes an immutable `PolicyAuditLog` row: `PolicyId`, `Field`, `OldValue`, `NewValue`, `ChangedBy`, `ChangedAt`
+- `GET /api/v1/policies/{id}/audit` returns the full history for a policy
+- Critical for regulatory compliance in insurance — every state change must be attributable to a person
+
+**Rate limiting**
+- `Microsoft.AspNetCore.RateLimiting` with a sliding window: 100 requests / 60 s per client IP
+- Separate limit for the `BulkFlagAsync` endpoint (write-heavy): 10 requests / 60 s
+- Returns 429 with `Retry-After` header and Problem Details body
+
+### Priority 2 — Operational Readiness
+
+**Distributed tracing**
+- Add OpenTelemetry (`OpenTelemetry.Extensions.Hosting`, `OpenTelemetry.Instrumentation.AspNetCore`, `OpenTelemetry.Instrumentation.EntityFrameworkCore`)
+- Export traces to Azure Application Insights or Jaeger
+- Every request gets a `TraceId` propagated through the Kafka messages so a flag event can be traced from HTTP request → DB update → Kafka produce → consumer → DB update end-to-end
+
+**Structured alerting**
+- Prometheus metrics endpoint (`/metrics`) via `prometheus-net.AspNetCore`
+- Expose: request rate, error rate, p50/p95/p99 latency, DB query duration, Kafka consumer lag, cache hit/miss ratio
+- Grafana dashboard template shipped in `infra/grafana/`
+
+**Graceful shutdown**
+- `IHostApplicationLifetime` hook flushes Kafka producer and commits in-flight consumer offsets before the process exits
+- Kubernetes `terminationGracePeriodSeconds: 30` aligned with the flush timeout
+
+**Testcontainers-based integration tests**
+- Replace `WebApplicationFactory` + InMemory DB with real SQL Server container (`Testcontainers.MsSql`)
+- Ensures EF Core migrations, indexes, and SQL Server-specific behaviour are all exercised in CI
+- One `DockerFixture` class manages container lifecycle across the test suite
+
+### Priority 3 — Product Features (dashboard value)
+
+**Policy lifecycle management**
+- `POST /api/v1/policies/{id}/renew` — creates a new policy record with a new term, links to the original via `RenewedFromId`, publishes a `PolicyRenewed` Kafka event
+- `POST /api/v1/policies/{id}/cancel` — sets status to `Cancelled`, records `CancellationReason`, publishes `PolicyCancelled`
+- `POST /api/v1/policies/{id}/status` — manual status override for managers, writes audit log entry
+
+**Real-time dashboard updates (SignalR)**
+- `PolicyHub` pushes status-change notifications to connected dashboard clients the moment the Kafka consumer processes a message
+- Client subscribes to `policy/{id}/updates` or `summary/updates`
+- Eliminates the need for the dashboard to poll `/summary` — the cache TTL becomes a safety net, not the primary freshness mechanism
+
+**Advanced filtering and search**
+- Full-text search via SQL Server `FREETEXT` or Azure Cognitive Search for typo-tolerant policyholder name lookup
+- Saved filter sets: users persist named filter combinations (`my-expiring-this-month`) and recall them by ID
+- `GET /api/v1/policies/export?format=csv` — streams a CSV of the current filtered result set using `CsvHelper`; respects all active filter parameters; returns 202 + a job ID for large exports
+
+**Analytics endpoints**
+- `GET /api/v1/analytics/premium-trend?months=12` — monthly premium totals for the past N months, grouped by line of business
+- `GET /api/v1/analytics/expiry-forecast?days=90` — policies expiring in the next N days, grouped by week and region, for renewal pipeline planning
+- `GET /api/v1/analytics/flag-rate` — percentage of policies flagged per underwriter over the last 30 days
+
+**Bulk operations**
+- `PATCH /api/v1/policies/status` — bulk status update for a list of IDs (manager role only), writes audit log for each
+- `POST /api/v1/policies/import` — accepts a CSV of new policies, validates all rows before committing any, returns a report of rows accepted / rejected with reasons
+
+### Priority 4 — Infrastructure Maturity
+
+**Multi-region read replicas**
+- Route read endpoints (`GET /policies`, `GET /policies/{id}`, `GET /summary`) to an Azure SQL read replica
+- Write endpoints stay on the primary; EF Core `UseQuerySplittingBehavior` and `AsNoTracking()` enforced on all read paths
+- Reduces primary DB load for the high-volume list endpoint
+
+**Secret rotation without restarts**
+- Replace `IConfiguration` secret reads at startup with `Azure.Extensions.AspNetCore.Configuration.Secrets` (Azure Key Vault provider)
+- Secrets refresh on a 5-minute poll cycle — a rotated DB password or Kafka credential is picked up without redeployment
+
+**Database partitioning**
+- Partition the `Policies` table by `Region` (SQL Server partition function) once row count exceeds 10M
+- Queries filtered by region hit a single partition; aggregation queries parallelise across partitions
+- Partition scheme documented as ADR-011
+
+---
+
 ## Developer Tooling
 
 This repository uses Claude Code with a structured multi-agent workflow. The `.claude/` directory contains:
